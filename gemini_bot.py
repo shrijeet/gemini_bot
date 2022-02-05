@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import boto3
 import configparser
 import datetime
 import decimal
@@ -107,11 +106,6 @@ if __name__ == "__main__":
     client_key = config.get(config_section, 'CLIENT_KEY')
     secret_key = config.get(config_section, 'CLIENT_SECRET')
 
-    sns_topic = config.get(config_section, 'SNS_TOPIC')
-    aws_access_key_id = config.get(config_section, 'AWS_ACCESS_KEY_ID')
-    aws_secret_access_key = config.get(config_section, 'AWS_SECRET_ACCESS_KEY')
-    aws_region = config.get(config_section, 'AWS_REGION')
-
     gemini_api_conn = GeminiApiConnection(client_key=client_key, client_secret=secret_key)
 
     # Configure the market details
@@ -133,14 +127,7 @@ if __name__ == "__main__":
     print(f"base_increment: {base_increment}")
     print(f"quote_increment: {quote_increment}")
 
-    # Prep boto SNS client for email notifications
-    sns = boto3.client(
-        "sns",
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key,
-        region_name=aws_region
-    )
-
+    
     def calculate_midmarket_price():
         order_book = gemini_api_conn.current_order_book(market_name)
 
@@ -176,11 +163,7 @@ if __name__ == "__main__":
                     price=price
                 )
         except GeminiRequestException as e:
-            sns.publish(
-                TopicArn=sns_topic,
-                Subject=f"ERROR placing {base_currency} {order_side} order: {e.response_json.get('reason')}",
-                Message=json.dumps(e.response_json, indent=4)
-            )
+            print(f"ERROR placing {base_currency} {order_side} order: {e.response_json.get('reason')}")
             print(json.dumps(e.response_json, indent=4))
             exit()
         return result
@@ -199,20 +182,12 @@ if __name__ == "__main__":
     retries = 0
     while Decimal(order.get('remaining_amount')) > Decimal('0'):
         if total_wait_time > warn_after:
-            sns.publish(
-                TopicArn=sns_topic,
-                Subject=f"{market_name} {order_side} order of {amount} {amount_currency} OPEN/UNFILLED",
-                Message=json.dumps(order, indent=4)
-            )
+            print(f"{market_name} {order_side} order of {amount} {amount_currency} OPEN/UNFILLED")
             exit()
 
         if order.get('is_cancelled'):
             # Most likely the order was manually cancelled in the UI
-            sns.publish(
-                TopicArn=sns_topic,
-                Subject=f"{market_name} {order_side} order of {amount} {amount_currency} CANCELLED",
-                Message=json.dumps(order, sort_keys=True, indent=4)
-            )
+            print(f"{market_name} {order_side} order of {amount} {amount_currency} CANCELLED")
             exit()
 
         print(f"{get_timestamp()}: Order {order_id} still pending. Sleeping for {wait_time} (total {total_wait_time})")
@@ -225,9 +200,4 @@ if __name__ == "__main__":
 
     subject = f"{market_name} {order_side} order of {amount} {amount_currency} complete @ {midmarket_price} {quote_currency}"
     print(subject)
-    sns.publish(
-        TopicArn=sns_topic,
-        Subject=subject,
-        Message=json.dumps(order, sort_keys=True, indent=4)
-    )
 
